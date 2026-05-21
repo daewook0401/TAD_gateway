@@ -1,10 +1,14 @@
 package com.tad.gateway.auth.service;
 
+import java.io.IOException;
+import java.security.GeneralSecurityException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.UUID;
 
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,6 +32,7 @@ import com.tad.gateway.auth.entity.User;
 import com.tad.gateway.auth.repository.UserRepository;
 import com.tad.gateway.security.jwt.JwtUtil;
 import com.tad.gateway.common.util.TextUtils;
+import com.tad.gateway.common.config.oauth.GoogleOAuthProperties;
 
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.http.HttpServletRequest;
@@ -45,6 +50,8 @@ public class AuthService {
     private final LoginHistoryService loginHistoryService;
     private final RoleRepository roleRepository;
     private final UserRoleRepository userRoleRepository;
+    private final GoogleIdTokenVerifier googleIdTokenVerifier;
+    private final GoogleOAuthProperties googleOAuthProperties;
 
     @Transactional
     public AuthResponse signup(SignupRequest request) {
@@ -111,23 +118,7 @@ public class AuthService {
         saveLoginHistory(user.getId(), "NORMAL", "SUCCESS");
         List<String> roles = userRoleRepository.findRoleNamesByUserId(user.getId());
 
-        UUID publicId = UUID.randomUUID();
-        String accessToken = jwtUtil.getAccessToken(publicId.toString(), roles);
-        String refreshToken = jwtUtil.getRefreshToken(publicId.toString(), roles);
-
-        refreshTokenRedisService.save(
-            publicId,
-            user.getId(),
-            refreshToken,
-            Duration.ofMinutes(jwtUtil.getRefreshTokenMinutes())
-        );
-
-        return AuthResponse.builder()
-            .success(true)
-            .user(AuthUserResponse.from(user, roles))
-            .accessToken(accessToken)
-            .refreshToken(refreshToken)
-            .build();
+        return issueLoginResponse(user, roles);
     }
 
     public SuccessResponse logout(String authorization, String refreshToken) {
@@ -181,12 +172,32 @@ public class AuthService {
             .build();
     }
 
+    @Transactional
     public AuthResponse googleLogin(String credentialToken) {
         if (credentialToken == null || credentialToken.isBlank()) {
             throw new IllegalArgumentException("INVALID_GOOGLE_TOKEN");
         }
 
-        throw new UnsupportedOperationException("GOOGLE_LOGIN_NOT_ENABLED");
+        GoogleIdToken.Payload payload = verifyGoogleCredential(credentialToken);
+        String email = normalizeEmail(payload.getEmail());
+        if (email == null || email.isBlank() || !Boolean.TRUE.equals(payload.getEmailVerified())) {
+            throw new IllegalArgumentException("INVALID_GOOGLE_TOKEN");
+        }
+
+        User user = userRepository.findByEmail(email)
+            .orElseGet(() -> createGoogleUser(email, payload));
+
+        if (!"ACTIVE".equalsIgnoreCase(user.getStatus())) {
+            saveLoginHistory(user.getId(), "GOOGLE", "BLOCKED");
+            throw new IllegalArgumentException("비활성화된 계정입니다.");
+        }
+
+        updateGoogleProfileImage(user, payload);
+        user.setLastLoginAt(OffsetDateTime.now());
+        saveLoginHistory(user.getId(), "GOOGLE", "SUCCESS");
+
+        List<String> roles = userRoleRepository.findRoleNamesByUserId(user.getId());
+        return issueLoginResponse(user, roles);
     }
 
     @Transactional(readOnly = true)
@@ -228,6 +239,108 @@ public class AuthService {
 
     private String normalizeEmail(String email) {
         return TextUtils.normalizeNullableLowerCase(email);
+    }
+
+    private AuthResponse issueLoginResponse(User user, List<String> roles) {
+        UUID publicId = UUID.randomUUID();
+        String accessToken = jwtUtil.getAccessToken(publicId.toString(), roles);
+        String refreshToken = jwtUtil.getRefreshToken(publicId.toString(), roles);
+
+        refreshTokenRedisService.save(
+            publicId,
+            user.getId(),
+            refreshToken,
+            Duration.ofMinutes(jwtUtil.getRefreshTokenMinutes())
+        );
+
+        return AuthResponse.builder()
+            .success(true)
+            .user(AuthUserResponse.from(user, roles))
+            .accessToken(accessToken)
+            .refreshToken(refreshToken)
+            .build();
+    }
+
+    private GoogleIdToken.Payload verifyGoogleCredential(String credentialToken) {
+        if (!googleOAuthProperties.hasClientId()) {
+            throw new IllegalStateException("GOOGLE_OAUTH_NOT_CONFIGURED");
+        }
+
+        try {
+            GoogleIdToken idToken = googleIdTokenVerifier.verify(credentialToken.trim());
+            if (idToken == null) {
+                throw new IllegalArgumentException("INVALID_GOOGLE_TOKEN");
+            }
+            return idToken.getPayload();
+        } catch (GeneralSecurityException | IOException e) {
+            throw new IllegalArgumentException("INVALID_GOOGLE_TOKEN", e);
+        }
+    }
+
+    private User createGoogleUser(String email, GoogleIdToken.Payload payload) {
+        User savedUser = userRepository.save(User.builder()
+            .email(email)
+            .nickname(resolveGoogleNickname(payload, email))
+            .profileImageUrl(resolveGooglePicture(payload))
+            .emailVerified(true)
+            .status("ACTIVE")
+            .build());
+
+        Long roleId = roleRepository.findByRoleName("ROLE_USER")
+            .orElseThrow(() -> new IllegalStateException("기본 권한 ROLE_USER가 존재하지 않습니다."))
+            .getId();
+
+        userRoleRepository.save(UserRole.builder()
+            .userId(savedUser.getId())
+            .roleId(roleId)
+            .build());
+
+        return savedUser;
+    }
+
+    private String resolveGoogleNickname(GoogleIdToken.Payload payload, String email) {
+        Object name = payload.get("name");
+        String base = name instanceof String value && !value.isBlank()
+            ? value.trim()
+            : email.substring(0, email.indexOf("@"));
+
+        base = base.replaceAll("\\s+", " ").trim();
+        if (base.length() < 2) {
+            base = "google";
+        }
+        if (base.length() > 20) {
+            base = base.substring(0, 20);
+        }
+
+        if (!userRepository.existsByNickname(base)) {
+            return base;
+        }
+
+        String prefix = base.length() > 15 ? base.substring(0, 15) : base;
+        for (int attempt = 0; attempt < 10; attempt++) {
+            String suffix = UUID.randomUUID().toString().substring(0, 4);
+            String candidate = prefix + "_" + suffix;
+            if (!userRepository.existsByNickname(candidate)) {
+                return candidate;
+            }
+        }
+
+        return "google_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
+    private void updateGoogleProfileImage(User user, GoogleIdToken.Payload payload) {
+        String picture = resolveGooglePicture(payload);
+        if (picture != null && (user.getProfileImageUrl() == null || user.getProfileImageUrl().isBlank())) {
+            user.setProfileImageUrl(picture);
+        }
+    }
+
+    private String resolveGooglePicture(GoogleIdToken.Payload payload) {
+        Object picture = payload.get("picture");
+        if (picture instanceof String value && !value.isBlank()) {
+            return value;
+        }
+        return null;
     }
 
     private java.util.Optional<UUID> resolvePublicId(String authorization, String refreshToken) {

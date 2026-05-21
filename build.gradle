@@ -28,6 +28,7 @@ repositories {
 
 ext {
 	jjwtVersion = '0.12.3'
+	googleApiClientVersion = '2.7.2'
 	lombokVersion = '1.18.30'
 	postgresqlVersion = '42.7.8'
 }
@@ -43,6 +44,7 @@ dependencies {
 
 	implementation "org.postgresql:postgresql:${postgresqlVersion}"
 	implementation "io.jsonwebtoken:jjwt-api:${jjwtVersion}"
+	implementation "com.google.api-client:google-api-client:${googleApiClientVersion}"
 
 	runtimeOnly "io.jsonwebtoken:jjwt-impl:${jjwtVersion}"
 	runtimeOnly "io.jsonwebtoken:jjwt-jackson:${jjwtVersion}"
