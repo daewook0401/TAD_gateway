@@ -1,0 +1,83 @@
+name: Deploy TAD Gateway
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: main
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./gradlew
+
+      - name: Build jar
+        run: ./gradlew clean bootJar
+
+      - name: Rename jar
+        run: |
+          JAR_FILE="$(find build/libs -maxdepth 1 -type f -name '*.jar' ! -name '*-plain.jar' -print -quit)"
+          test -n "$JAR_FILE"
+          cp "$JAR_FILE" app.jar
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create deploy directories on server
+        run: |
+          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+            mkdir -p /home/daewook/server/tad_gateway &&
+            mkdir -p /home/daewook/server/tad_gateway/config
+          "
+
+      - name: Copy jar to server
+        run: |
+          scp -P ${{ secrets.SSH_PORT }} app.jar \
+            ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:/home/daewook/server/tad_gateway/app.jar
+
+      - name: Deploy on server
+        run: |
+          ssh -p ${{ secrets.SSH_PORT }} ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }} "
+            set -e
+            cd /home/daewook/server/tad_gateway
+            export GIT_COMMIT_HASH=${GITHUB_SHA::7}
+
+            if [ -f docker-compose.prod.yml ]; then
+              docker compose -f docker-compose.prod.yml down || true
+              docker compose -f docker-compose.prod.yml up -d --build
+              docker image prune -f
+            elif [ -f docker-compose.yml ]; then
+              docker compose down || true
+              docker compose up -d --build
+              docker image prune -f
+            elif systemctl --user list-unit-files 2>/dev/null | grep -q '^tad-gateway.service'; then
+              systemctl --user restart tad-gateway
+            else
+              if [ ! -f /home/daewook/server/tad_gateway/config/application-prod.yml ]; then
+                echo 'Gateway config file is missing: /home/daewook/server/tad_gateway/config/application-prod.yml'
+                exit 1
+              fi
+
+              pkill -f '/home/daewook/server/tad_gateway/app.jar' || true
+              nohup java -jar /home/daewook/server/tad_gateway/app.jar \
+                --spring.config.location=file:/home/daewook/server/tad_gateway/config/application-prod.yml \
+                > /home/daewook/server/tad_gateway/app.log 2>&1 &
+            fi
+          "

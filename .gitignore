@@ -10,3 +10,7 @@ out/
 application-local.yml
 *.yml
 *.yaml
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
+!.github/workflows/*.yaml
