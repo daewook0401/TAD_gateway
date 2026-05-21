@@ -1,0 +1,82 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.5.11'
+	id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.tad'
+version = '0.0.1-SNAPSHOT'
+description = 'TAD Gateway - Authentication and API Gateway Service'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(21)
+	}
+	sourceCompatibility = '21'
+	targetCompatibility = '21'
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+ext {
+	jjwtVersion = '0.12.3'
+	lombokVersion = '1.18.30'
+	postgresqlVersion = '42.7.8'
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+	implementation "org.postgresql:postgresql:${postgresqlVersion}"
+	implementation "io.jsonwebtoken:jjwt-api:${jjwtVersion}"
+
+	runtimeOnly "io.jsonwebtoken:jjwt-impl:${jjwtVersion}"
+	runtimeOnly "io.jsonwebtoken:jjwt-jackson:${jjwtVersion}"
+
+	compileOnly "org.projectlombok:lombok:${lombokVersion}"
+	annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testImplementation 'org.springframework.security:spring-security-test'
+	testRuntimeOnly 'com.h2database:h2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}
+
+bootRun {
+	[
+		'spring.profiles.active',
+		'spring.datasource.url',
+		'spring.datasource.username',
+		'spring.datasource.password',
+		'spring.data.redis.host',
+		'spring.data.redis.port',
+		'spring.data.redis.password'
+	].each { propertyName ->
+		def propertyValue = System.getProperty(propertyName)
+		if (propertyValue != null) {
+			systemProperty propertyName, propertyValue
+		}
+	}
+}
+
+tasks.withType(JavaCompile) {
+	options.encoding = 'UTF-8'
+	options.compilerArgs << '-parameters'
+}
