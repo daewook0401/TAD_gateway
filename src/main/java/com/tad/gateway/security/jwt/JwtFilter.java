@@ -117,6 +117,7 @@ public class JwtFilter extends OncePerRequestFilter {
                     || "/auth/signup".equals(path)
                     || "/auth/logout".equals(path)
                     || "/auth/refresh".equals(path)
+                    || "/auth/introspect".equals(path)
                     || "/auth/mail".equals(path)
                     || "/auth/mail/verify".equals(path)
                     || "/auth/google-login".equals(path)

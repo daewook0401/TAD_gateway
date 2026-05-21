@@ -81,6 +81,7 @@ public class SecurityConfigure {
                     "/auth/signup",
                     "/auth/logout",
                     "/auth/refresh",
+                    "/auth/introspect",
                     "/auth/mail",
                     "/auth/mail/verify",
                     "/auth/google-login",

@@ -20,6 +20,7 @@ import com.tad.gateway.auth.dto.response.AuthResponse;
 import com.tad.gateway.auth.dto.response.AuthUserResponse;
 import com.tad.gateway.auth.dto.response.ProfileResponse;
 import com.tad.gateway.auth.dto.response.SuccessResponse;
+import com.tad.gateway.auth.dto.response.TokenIntrospectionResponse;
 import com.tad.gateway.auth.entity.UserRole;
 import com.tad.gateway.auth.repository.RoleRepository;
 import com.tad.gateway.auth.repository.UserRoleRepository;
@@ -186,6 +187,43 @@ public class AuthService {
         }
 
         throw new UnsupportedOperationException("GOOGLE_LOGIN_NOT_ENABLED");
+    }
+
+    @Transactional(readOnly = true)
+    public TokenIntrospectionResponse introspectAccessToken(String authorization) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            return TokenIntrospectionResponse.inactive("INVALID_TOKEN");
+        }
+
+        String token = authorization.substring(7).trim();
+        if (token.isBlank()) {
+            return TokenIntrospectionResponse.inactive("INVALID_TOKEN");
+        }
+
+        try {
+            Claims claims = jwtUtil.parseJwt(token);
+            if (!"access".equals(claims.get("type", String.class))) {
+                return TokenIntrospectionResponse.inactive("INVALID_TOKEN");
+            }
+
+            UUID publicId = UUID.fromString(claims.getSubject());
+            Long userId = refreshTokenRedisService.getUserId(publicId);
+            if (userId == null) {
+                return TokenIntrospectionResponse.inactive("INVALID_TOKEN");
+            }
+
+            User user = userRepository.findById(userId).orElse(null);
+            if (user == null || !"ACTIVE".equalsIgnoreCase(user.getStatus())) {
+                return TokenIntrospectionResponse.inactive("INVALID_TOKEN");
+            }
+
+            List<String> roles = userRoleRepository.findRoleNamesByUserId(user.getId());
+            return TokenIntrospectionResponse.active(user, roles);
+        } catch (IllegalArgumentException e) {
+            return TokenIntrospectionResponse.inactive("EXPIRED".equals(e.getMessage())
+                ? "ACCESS_TOKEN_EXPIRED"
+                : "INVALID_TOKEN");
+        }
     }
 
     private String normalizeEmail(String email) {

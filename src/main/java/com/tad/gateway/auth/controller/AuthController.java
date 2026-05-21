@@ -25,6 +25,7 @@ import com.tad.gateway.auth.dto.response.AuthResponse;
 import com.tad.gateway.auth.dto.response.MailVerificationResponse;
 import com.tad.gateway.auth.dto.response.ProfileResponse;
 import com.tad.gateway.auth.dto.response.SuccessResponse;
+import com.tad.gateway.auth.dto.response.TokenIntrospectionResponse;
 import com.tad.gateway.auth.dto.token.TokenRefreshRequest;
 import com.tad.gateway.auth.dto.token.TokenResponse;
 import com.tad.gateway.auth.entity.User;
@@ -120,5 +121,12 @@ public class AuthController {
 		return ResponseEntity.ok()
 			.headers(refreshTokenCookieService.headersWithRefreshCookie(response.getRefreshToken()))
 			.body(response.withoutRefreshToken());
+	}
+
+	@PostMapping("/introspect")
+	public ResponseEntity<TokenIntrospectionResponse> introspect(
+		@RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization
+	) {
+		return ResponseEntity.ok(authService.introspectAccessToken(authorization));
 	}
 }
