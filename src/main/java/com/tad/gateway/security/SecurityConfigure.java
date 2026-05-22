@@ -85,6 +85,7 @@ public class SecurityConfigure {
                     "/auth/mail",
                     "/auth/mail/verify",
                     "/auth/google-login",
+                    "/auth/google-signup",
                     "/health",
                     "/actuator/**"
                 ).permitAll()

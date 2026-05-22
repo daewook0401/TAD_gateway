@@ -9,6 +9,7 @@ import java.util.UUID;
 
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
 import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -16,8 +17,10 @@ import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import com.tad.gateway.auth.dto.GoogleSignupTicket;
 import com.tad.gateway.auth.dto.request.ChangePasswordRequest;
 import com.tad.gateway.auth.dto.request.LoginRequest;
+import com.tad.gateway.auth.dto.request.GoogleSignupRequest;
 import com.tad.gateway.auth.dto.request.SignupRequest;
 import com.tad.gateway.auth.dto.request.UpdateProfileRequest;
 import com.tad.gateway.auth.dto.response.AuthResponse;
@@ -52,6 +55,10 @@ public class AuthService {
     private final UserRoleRepository userRoleRepository;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
     private final GoogleOAuthProperties googleOAuthProperties;
+    private final GoogleSignupRedisService googleSignupRedisService;
+
+    @Value("${app.oauth2.google.signup-token-minutes:10}")
+    private long googleSignupTokenMinutes;
 
     @Transactional
     public AuthResponse signup(SignupRequest request) {
@@ -184,8 +191,10 @@ public class AuthService {
             throw new IllegalArgumentException("INVALID_GOOGLE_TOKEN");
         }
 
-        User user = userRepository.findByEmail(email)
-            .orElseGet(() -> createGoogleUser(email, payload));
+        User user = userRepository.findByEmail(email).orElse(null);
+        if (user == null) {
+            return issueGoogleSignupRequiredResponse(email, payload);
+        }
 
         if (!"ACTIVE".equalsIgnoreCase(user.getStatus())) {
             saveLoginHistory(user.getId(), "GOOGLE", "BLOCKED");
@@ -193,6 +202,39 @@ public class AuthService {
         }
 
         updateGoogleProfileImage(user, payload);
+        user.setLastLoginAt(OffsetDateTime.now());
+        saveLoginHistory(user.getId(), "GOOGLE", "SUCCESS");
+
+        List<String> roles = userRoleRepository.findRoleNamesByUserId(user.getId());
+        return issueLoginResponse(user, roles);
+    }
+
+    @Transactional
+    public AuthResponse completeGoogleSignup(GoogleSignupRequest request) {
+        GoogleSignupTicket ticket = googleSignupRedisService.get(request.getRegistrationToken());
+        if (ticket == null) {
+            throw new IllegalArgumentException("Google 가입 정보가 만료되었습니다. 다시 시도해주세요.");
+        }
+
+        String email = normalizeEmail(ticket.getEmail());
+        String nickname = request.getNickname().trim();
+        if (email == null || email.isBlank()) {
+            googleSignupRedisService.delete(request.getRegistrationToken());
+            throw new IllegalArgumentException("Google 가입 정보가 올바르지 않습니다. 다시 시도해주세요.");
+        }
+
+        if (userRepository.existsByEmail(email)) {
+            googleSignupRedisService.delete(request.getRegistrationToken());
+            throw new IllegalArgumentException("이미 가입된 이메일입니다. 로그인해주세요.");
+        }
+
+        if (userRepository.existsByNickname(nickname)) {
+            throw new IllegalArgumentException("이미 사용 중인 닉네임입니다.");
+        }
+
+        User user = createGoogleUser(email, nickname, ticket.getProfileImageUrl());
+        googleSignupRedisService.delete(request.getRegistrationToken());
+
         user.setLastLoginAt(OffsetDateTime.now());
         saveLoginHistory(user.getId(), "GOOGLE", "SUCCESS");
 
@@ -261,6 +303,30 @@ public class AuthService {
             .build();
     }
 
+    private AuthResponse issueGoogleSignupRequiredResponse(String email, GoogleIdToken.Payload payload) {
+        String picture = resolveGooglePicture(payload);
+        String suggestedNickname = resolveGoogleNickname(payload, email);
+        String registrationToken = googleSignupRedisService.save(
+            GoogleSignupTicket.builder()
+                .email(email)
+                .googleSubject(payload.getSubject())
+                .suggestedNickname(suggestedNickname)
+                .profileImageUrl(picture)
+                .build(),
+            Duration.ofMinutes(googleSignupTokenMinutes)
+        );
+
+        return AuthResponse.builder()
+            .success(false)
+            .message("GOOGLE_SIGNUP_REQUIRED")
+            .registrationRequired(true)
+            .registrationToken(registrationToken)
+            .email(email)
+            .nickname(suggestedNickname)
+            .profileImageUrl(picture)
+            .build();
+    }
+
     private GoogleIdToken.Payload verifyGoogleCredential(String credentialToken) {
         if (!googleOAuthProperties.hasClientId()) {
             throw new IllegalStateException("GOOGLE_OAUTH_NOT_CONFIGURED");
@@ -277,11 +343,11 @@ public class AuthService {
         }
     }
 
-    private User createGoogleUser(String email, GoogleIdToken.Payload payload) {
+    private User createGoogleUser(String email, String nickname, String profileImageUrl) {
         User savedUser = userRepository.save(User.builder()
             .email(email)
-            .nickname(resolveGoogleNickname(payload, email))
-            .profileImageUrl(resolveGooglePicture(payload))
+            .nickname(nickname)
+            .profileImageUrl(profileImageUrl)
             .emailVerified(true)
             .status("ACTIVE")
             .build());

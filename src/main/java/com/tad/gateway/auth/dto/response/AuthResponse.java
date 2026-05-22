@@ -15,6 +15,11 @@ public class AuthResponse {
     private AuthUserResponse user;
     private String accessToken;
     private String refreshToken;
+    private Boolean registrationRequired;
+    private String registrationToken;
+    private String email;
+    private String nickname;
+    private String profileImageUrl;
 
     public AuthResponse withoutRefreshToken() {
         return AuthResponse.builder()
@@ -22,6 +27,11 @@ public class AuthResponse {
             .message(message)
             .user(user)
             .accessToken(accessToken)
+            .registrationRequired(registrationRequired)
+            .registrationToken(registrationToken)
+            .email(email)
+            .nickname(nickname)
+            .profileImageUrl(profileImageUrl)
             .build();
     }
 }

@@ -121,6 +121,7 @@ public class JwtFilter extends OncePerRequestFilter {
                     || "/auth/mail".equals(path)
                     || "/auth/mail/verify".equals(path)
                     || "/auth/google-login".equals(path)
+                    || "/auth/google-signup".equals(path)
             ))
             || "/health".equals(path)
             || path.startsWith("/actuator/");

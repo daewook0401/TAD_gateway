@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.tad.gateway.auth.dto.request.ChangePasswordRequest;
 import com.tad.gateway.auth.dto.request.GoogleLoginRequest;
+import com.tad.gateway.auth.dto.request.GoogleSignupRequest;
 import com.tad.gateway.auth.dto.request.LoginRequest;
 import com.tad.gateway.auth.dto.request.LogoutRequest;
 import com.tad.gateway.auth.dto.request.MailSendRequest;
@@ -108,7 +109,22 @@ public class AuthController {
 
 	@PostMapping("/google-login")
 	public ResponseEntity<AuthResponse> googleLogin(@Valid @RequestBody GoogleLoginRequest request) {
-		return ResponseEntity.ok(authService.googleLogin(request.getToken()));
+		AuthResponse response = authService.googleLogin(request.getToken());
+		if (response.getRefreshToken() == null) {
+			return ResponseEntity.ok(response);
+		}
+
+		return ResponseEntity.ok()
+			.headers(refreshTokenCookieService.headersWithRefreshCookie(response.getRefreshToken()))
+			.body(response.withoutRefreshToken());
+	}
+
+	@PostMapping("/google-signup")
+	public ResponseEntity<AuthResponse> googleSignup(@Valid @RequestBody GoogleSignupRequest request) {
+		AuthResponse response = authService.completeGoogleSignup(request);
+		return ResponseEntity.status(HttpStatus.CREATED)
+			.headers(refreshTokenCookieService.headersWithRefreshCookie(response.getRefreshToken()))
+			.body(response.withoutRefreshToken());
 	}
 
 	@PostMapping("/refresh")
