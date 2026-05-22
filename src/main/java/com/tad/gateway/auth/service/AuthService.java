@@ -13,6 +13,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -233,13 +235,14 @@ public class AuthService {
         }
 
         User user = createGoogleUser(email, nickname, ticket.getProfileImageUrl());
-        googleSignupRedisService.delete(request.getRegistrationToken());
 
         user.setLastLoginAt(OffsetDateTime.now());
-        saveLoginHistory(user.getId(), "GOOGLE", "SUCCESS");
+        saveLoginHistoryInCurrentTransaction(user.getId(), "GOOGLE", "SUCCESS");
 
         List<String> roles = userRoleRepository.findRoleNamesByUserId(user.getId());
-        return issueLoginResponse(user, roles);
+        AuthResponse response = issueLoginResponse(user, roles);
+        deleteGoogleSignupTicketAfterCommit(request.getRegistrationToken());
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -452,6 +455,31 @@ public class AuthService {
             resolveClientIp(request),
             resolveUserAgent(request)
         );
+    }
+
+    private void saveLoginHistoryInCurrentTransaction(Long userId, String loginType, String loginResult) {
+        HttpServletRequest request = currentRequest();
+        loginHistoryService.recordInCurrentTransaction(
+            userId,
+            loginType,
+            loginResult,
+            resolveClientIp(request),
+            resolveUserAgent(request)
+        );
+    }
+
+    private void deleteGoogleSignupTicketAfterCommit(String registrationToken) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            googleSignupRedisService.delete(registrationToken);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                googleSignupRedisService.delete(registrationToken);
+            }
+        });
     }
 
     private HttpServletRequest currentRequest() {

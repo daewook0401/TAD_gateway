@@ -17,6 +17,21 @@ public class LoginHistoryService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(Long userId, String loginType, String loginResult, String ipAddress, String userAgent) {
+        save(userId, loginType, loginResult, ipAddress, userAgent);
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInCurrentTransaction(
+        Long userId,
+        String loginType,
+        String loginResult,
+        String ipAddress,
+        String userAgent
+    ) {
+        save(userId, loginType, loginResult, ipAddress, userAgent);
+    }
+
+    private void save(Long userId, String loginType, String loginResult, String ipAddress, String userAgent) {
         loginHistoryRepository.save(LoginHistory.builder()
             .userId(userId)
             .ipAddress(ipAddress)
