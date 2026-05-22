@@ -16,6 +16,7 @@ public class ProfileResponse {
     private String nickname;
     private String email;
     private Boolean emailVerified;
+    private Boolean passwordLoginEnabled;
     private List<String> roles;
     private OffsetDateTime createdAt;
     private OffsetDateTime lastLoginAt;
@@ -26,6 +27,7 @@ public class ProfileResponse {
             .nickname(user.getNickname())
             .email(user.getEmail())
             .emailVerified(user.getEmailVerified())
+            .passwordLoginEnabled(user.getPasswordHash() != null && !user.getPasswordHash().isBlank())
             .roles(roles)
             .createdAt(user.getCreatedAt())
             .lastLoginAt(user.getLastLoginAt())

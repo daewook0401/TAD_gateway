@@ -167,7 +167,11 @@ public class AuthService {
         User user = userRepository.findById(currentUser.getId())
             .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
 
-        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
+        if (user.getPasswordHash() == null || user.getPasswordHash().isBlank()) {
+            throw new IllegalArgumentException("소셜 로그인 계정은 비밀번호를 변경할 수 없습니다.");
+        }
+
+        if (!passwordEncoder.matches(request.getCurrentPassword(), user.getPasswordHash())) {
             throw new IllegalArgumentException("현재 비밀번호가 올바르지 않습니다.");
         }
 

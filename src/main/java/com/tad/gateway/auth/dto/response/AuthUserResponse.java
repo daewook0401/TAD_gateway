@@ -15,6 +15,7 @@ public class AuthUserResponse {
     private String nickname;
     private String email;
     private String memberRole;
+    private Boolean passwordLoginEnabled;
     private List<String> roles;
 
     public static AuthUserResponse from(User user, List<String> roles) {
@@ -24,6 +25,7 @@ public class AuthUserResponse {
             .nickname(user.getNickname())
             .email(user.getEmail())
             .memberRole(memberRole)
+            .passwordLoginEnabled(user.getPasswordHash() != null && !user.getPasswordHash().isBlank())
             .roles(roles)
             .build();
     }
