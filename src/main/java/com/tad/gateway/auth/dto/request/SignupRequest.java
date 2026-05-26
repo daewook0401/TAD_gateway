@@ -1,5 +1,6 @@
 package com.tad.gateway.auth.dto.request;
 
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -21,4 +22,7 @@ public class SignupRequest {
     @NotBlank(message = "비밀번호는 필수입니다.")
     @Size(min = 8, message = "비밀번호는 8자 이상이어야 합니다.")
     private String password;
+
+    @AssertTrue(message = "이용약관 및 개인정보처리방침에 동의해주세요.")
+    private boolean termsAccepted;
 }
