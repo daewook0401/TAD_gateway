@@ -186,6 +186,28 @@ public class AuthService {
     }
 
     @Transactional
+    public SuccessResponse withdraw(User currentUser) {
+        User user = userRepository.findById(currentUser.getId())
+            .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+
+        if (!"ACTIVE".equalsIgnoreCase(user.getStatus())) {
+            throw new IllegalArgumentException("이미 비활성화된 계정입니다.");
+        }
+
+        user.setEmail(deletedEmail(user));
+        user.setNickname(deletedNickname(user));
+        user.setPasswordHash(null);
+        user.setProfileImageUrl(null);
+        user.setEmailVerified(false);
+        user.setStatus("DELETED");
+        deleteRefreshSessionsAfterCommit(user.getId());
+
+        return SuccessResponse.builder()
+            .success(true)
+            .build();
+    }
+
+    @Transactional
     public AuthResponse googleLogin(String credentialToken) {
         if (credentialToken == null || credentialToken.isBlank()) {
             throw new IllegalArgumentException("INVALID_GOOGLE_TOKEN");
@@ -484,6 +506,28 @@ public class AuthService {
                 googleSignupRedisService.delete(registrationToken);
             }
         });
+    }
+
+    private void deleteRefreshSessionsAfterCommit(Long userId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            refreshTokenRedisService.deleteAllByUserId(userId);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                refreshTokenRedisService.deleteAllByUserId(userId);
+            }
+        });
+    }
+
+    private String deletedEmail(User user) {
+        return "deleted-" + user.getId() + "-" + UUID.randomUUID() + "@deleted.local";
+    }
+
+    private String deletedNickname(User user) {
+        return "탈퇴회원_" + user.getId();
     }
 
     private HttpServletRequest currentRequest() {

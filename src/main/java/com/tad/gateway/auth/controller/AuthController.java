@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.CookieValue;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -105,6 +106,14 @@ public class AuthController {
 		@Valid @RequestBody ChangePasswordRequest request
 	) {
 		return ResponseEntity.ok(authService.changePassword(currentUser, request));
+	}
+
+	@DeleteMapping("/me")
+	public ResponseEntity<SuccessResponse> withdraw(@AuthenticationPrincipal User currentUser) {
+		SuccessResponse response = authService.withdraw(currentUser);
+		return ResponseEntity.ok()
+			.headers(refreshTokenCookieService.headersClearingRefreshCookie())
+			.body(response);
 	}
 
 	@PostMapping("/google-login")
